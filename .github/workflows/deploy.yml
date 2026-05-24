@@ -1,0 +1,47 @@
+name: Deploy
+
+on: push
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-main
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    name: Deploy to W7S
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Deploy
+        uses: w7s-io/w7s-cloud@v1
+        with:
+          token: ${{ github.token }}
+
+      - name: Smoke test
+        run: |
+          set -euo pipefail
+          url="https://w7s-io.w7s.cloud/example-queue-consumer/health"
+
+          for attempt in {1..12}; do
+            if body="$(curl -fsS "$url")"; then
+              echo "$body"
+              BODY="$body" node - <<'NODE'
+          const body = JSON.parse(process.env.BODY);
+          if (body.service !== "example-queue-consumer") {
+            throw new Error(`Unexpected service: ${body.service}`);
+          }
+          if (body.status !== "ok") {
+            throw new Error(`Unexpected status: ${body.status}`);
+          }
+          NODE
+              exit 0
+            fi
+            sleep 5
+          done
+
+          curl -fsS "$url"
